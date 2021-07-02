@@ -19,6 +19,7 @@ Summary_File_Folder = easygui.diropenbox("Select The Directory To Save The Summa
 RLU_Filename_Assay_df = pd.DataFrame()
 
 RLU_Filename_dict = {}
+rlu_values_dict = {}
 RLU_Filename_Time_Start_End_dict = {}
 RLU_Concurrent_Filenames_dict = {}
 RLU_Concurrent_Assays_dict = {}
@@ -37,52 +38,100 @@ current_raw_file_line_counter = 0
 #filecounter = 0
 for path, subdirs, files in os.walk(Raw_File_Folder):
 
-    #  Drop filenames that contain RLU (processed after summary files)
+    #  Drop filenames that contain RLU (processed after summary files), only keep .txt files
     files = [file for file in files if "RLU" not in file]
+    files = [file for file in files if ".txt" in file]
 
     for file in files:
-        #  Check if file is NOT RLU file, save cartridge info
-        #if file[0:3] != 'RLU':
-        splitfile = file.split("_")
-        Sample_Start_Time_list = splitfile[-7:-1]
-        Sample_Start_Time = '_'.join(Sample_Start_Time_list)
 
-        SampleID_found = False
-        Cartridge_Lot_counter = 0
-        Cartridge_Lot_ID = ''
+        file = file.strip()
+
+        splitfile = file.split("_")
+        sample_start_time_list = splitfile[-7:-1]
+        sample_start_time = '_'.join(sample_start_time_list)
+
+        sampleid_found = False
+        test_id_found = False
+        start_end_times_found = False
+        rlu_found = False
+        save_rlu_values = False
+        cartridge_lot_counter = 0
+        cartridge_lot_id = ''
+        current_file_rlu_values_list = []
 
         #  Read each line of file
         for line in open(Raw_File_Folder + '\\' + file, encoding='utf-16'):
 
             #  Remove new line character at the end of the current line
             line = line.rstrip("\n")
-
             splitline_tab = line.split("\t")
 
-            if "SampleID" in line and not SampleID_found:
+            if "SampleID" in line and not sampleid_found:
                 splitline_colon = line.split(":", 1)
-                SampleID = splitline_colon[1].strip()
-                SampleID_found = True
+                sampleid = splitline_colon[1].strip()
+                sampleid_found = True
 
-            if len(splitline_tab) < 2:
-                continue
+            #  Save RLU Average
+            elif 'RLUAverage:' in line and not rlu_found:
+                rlu_average = splitline_tab[0].split(":", 1)[1].strip()
+                rlu_found = True
 
-            if splitline_tab[1] == "Type: Cartridge":
+            elif len(splitline_tab) < 2:
+                if 'RLUAverage:' in line and not rlu_found and not save_rlu_values:
+                    rlu_average = splitline_tab[0].split(":", 1)[1].strip()
+                    rlu_found = True
+                    continue
+                elif splitline_tab[0] == '#End':
+                    save_rlu_values = False
+                else:
+                    continue
+
+            elif splitline_tab[1] == "Type: Cartridge":
                 splitline_colon = splitline_tab[2].split(":")
-                Cartridge_Lot_SN = splitline_colon[1].strip()
-                Cartridge_Lot_SN_split = Cartridge_Lot_SN.split("/")
-                Cartridge_Lot = Cartridge_Lot_SN_split[0]
-                Cartridge_SN = Cartridge_Lot_SN_split[1]
-                Cartridge_Lot_counter += 1
+                cartridge_lot_sn = splitline_colon[1].strip()
+                cartridge_lot_sn_split = cartridge_lot_sn.split("/")
+                cartridge_lot = cartridge_lot_sn_split[0]
+                cartridge_sn = cartridge_lot_sn_split[1]
+                cartridge_lot_counter += 1
 
-        Sample_Cartridge_dict[SampleID + "___" + Sample_Start_Time] = [Cartridge_Lot, Cartridge_SN]
+            #  Save start and end datetime
+            elif 'User Revision:' in line and not start_end_times_found:
+                start_time_str = splitline_tab[1].split(":", 1)[1].strip()
+                end_time_str = splitline_tab[2].split(":", 1)[1].strip()
+                start_end_times_found = True
+
+            #  Save test
+            elif '#Test:' in line and not test_id_found:
+                test_id = splitline_tab[0].split(":", 1)[1].strip()
+                test_id_found = True
+
+            #  Save list of each RLU values (used to compare with RLU files to drop duplicates)
+            elif splitline_tab[0] == '#Time':
+                save_rlu_values = True
+
+            elif save_rlu_values and '-' not in splitline_tab[0]:
+                current_file_rlu_values_list.append(int(splitline_tab[1]))
+
+        rlu_values_dict[file] = current_file_rlu_values_list
+
+        Sample_Cartridge_dict[sampleid + "___" + sample_start_time] = [cartridge_lot, cartridge_sn]
+
+        RLU_Filename_dict[file] = [sampleid] + [test_id] + [rlu_average] + [cartridge_lot] + [cartridge_sn] + [start_time_str] + [end_time_str]
+
+        RLU_Filename_Time_Start_End_dict[RLU_Filename_Time_Start_End_line_counter] = [file] + [sampleid] + [test_id] + [rlu_average] + ['Start'] + [start_time_str]
+        RLU_Filename_Time_Start_End_line_counter += 1
+
+        RLU_Filename_Time_Start_End_dict[RLU_Filename_Time_Start_End_line_counter] = [file] + [sampleid] + [test_id] + [rlu_average] + ['End'] + [end_time_str]
+        RLU_Filename_Time_Start_End_line_counter += 1
 
 
 for path, subdirs, files in os.walk(Raw_File_Folder):
-    for file in files:
 
-        #  Drop filenames that don't contain RLU (already processed in previous step)
-        files = [file for file in files if "RLU" in file]
+    #  Drop filenames that don't contain RLU (already processed in previous step)
+    files = [file for file in files if "RLU" in file]
+    files = [file for file in files if ".txt" in file]
+
+    for file in files:
 
         #  Check if file is RLU file, process
         if "RLU" in file and ".txt" in file:
@@ -93,6 +142,10 @@ for path, subdirs, files in os.walk(Raw_File_Folder):
             Sample_Start_Time_list = splitfile[-7:-1]
             Sample_Start_Time = '_'.join(Sample_Start_Time_list)
 
+            current_file_rlu_values_list = []
+            duplicate_file = False
+            save_rlu_values = False
+
             #  Initiate counter
             current_raw_file_line_counter = 0
 
@@ -102,6 +155,8 @@ for path, subdirs, files in os.walk(Raw_File_Folder):
                 #  Remove new line character at the end of the current line
                 line = line.rstrip("\n")
 
+                splitline_tab = line.split("\t")
+
                 #  Split line at each colon character
                 splitline = line.split(":", 1)
 
@@ -109,47 +164,32 @@ for path, subdirs, files in os.walk(Raw_File_Folder):
                     Test_End_Time_str = splitline[1].strip()
 
                 elif splitline[0] == 'FileName':
-                    Filename = splitline[1].strip()
+                    filename = splitline[1].strip()
+                    filename = filename[:-4]
+                    filename_split = filename.split('_')
 
                     #  Check if filename has extra characters at end (expect 'M' for AM/PM to be at certain position)
-                    if Filename[-5] != 'M':
+                    if filename[-1] != 'M':
 
                         #  Drop extra characters
-                        Filename = Filename[0: + Filename.rindex('_')]
+                        filename = filename[0: + filename.rindex('_')]
 
-                        #  Add leading zeros to hours if needed
-                        Filename_split = Filename.split('_')
-                        if len(Filename_split[-4]) == 1:
-                            Filename_split[-4] = '0' + Filename_split[-4]
-                            Filename = '_'.join(Filename_split)
 
-                            Test_Start_Time_str = Filename[-22:]
+                    #  Add leading zeros to hours if needed
+                    if len(filename_split[-4]) == 1:
+                        filename_split[-4] = '0' + filename_split[-4]
+                        filename = '_'.join(filename_split)
 
-                            #  Replace '_' character with appropriate characters for time
-                            Test_Start_Time_str = Test_Start_Time_str.replace('_', "/", 2)
-                            Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ', 1)
-                            Test_Start_Time_str = Test_Start_Time_str.replace('_', ':', 2)
-                            Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ')
+                    Test_Start_Time_str = filename[-22:]
 
-                    else:
-                        Filename_split = Filename.split('_')
+                    #  Replace '_' character with appropriate characters for time
+                    Test_Start_Time_str = Test_Start_Time_str.replace('_', "/", 2)
+                    Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ', 1)
+                    Test_Start_Time_str = Test_Start_Time_str.replace('_', ':', 2)
+                    Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ')
 
-                        #  Check if hours need leading zero added
-                        if len(Filename_split[-4]) == 1:
-                            Filename_split[-4] = '0' + Filename_split[-4]
-                            Filename = '_'.join(Filename_split)
 
-                        Test_Start_Time_str = Filename[-26:-4]
-                        Test_Start_Time_str = Test_Start_Time_str.split('M')
-                        Test_Start_Time_str = Test_Start_Time_str[0] + 'M'
-
-                        #  Replace '_' character with appropriate characters for time
-                        Test_Start_Time_str = Test_Start_Time_str.replace('_',"/", 2)
-                        Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ', 1)
-                        Test_Start_Time_str = Test_Start_Time_str.replace('_', ':', 2)
-                        Test_Start_Time_str = Test_Start_Time_str.replace('_', ' ')
-
-                elif splitline[0] == 'Test':
+                if splitline[0] == 'Test':
                     Test = splitline[1].split('Test')
                     Test = Test[0].strip()
 
@@ -159,18 +199,34 @@ for path, subdirs, files in os.walk(Raw_File_Folder):
                 elif splitline[0] == 'RLUAverage':
                     RLUAverage = splitline[1].strip()
 
-                    #  RLU average is the last value needed, break looping through lines once it's found
-                    break
+                #  Save list of each RLU values (used to compare with RLU files to drop duplicates)
+                elif line[0:5] == 'INDEX':
+                    save_rlu_values = True
+
+                elif save_rlu_values and splitline_tab[0] == '':
+                    save_rlu_values = False
+
+                elif save_rlu_values and '-' not in splitline_tab[0]:
+                        current_file_rlu_values_list.append(int(splitline_tab[1]))
+
+            #  Check if this RLU file is a duplicate of a non-RLU file
+            #  by comparing lists of RLU readings, skip to next file if true
+            for key in rlu_values_dict:
+                if current_file_rlu_values_list == rlu_values_dict[key]:
+                    duplicate_file = True
+
+            if duplicate_file:
+                continue
 
             #  Check if there was a full result file for current sample, save cartridge info if true
             if SampleID + '___' + Sample_Start_Time in Sample_Cartridge_dict:
-                Reagent_Cartridge_Lot = Sample_Cartridge_dict[SampleID + '___' + Sample_Start_Time][0]
-                Reagent_Cartridge_SN = Sample_Cartridge_dict[SampleID + '___' + Sample_Start_Time][1]
+                reagent_cartridge_lot = Sample_Cartridge_dict[SampleID + '___' + Sample_Start_Time][0]
+                reagent_cartridge_sn = Sample_Cartridge_dict[SampleID + '___' + Sample_Start_Time][1]
             else:
-                Reagent_Cartridge_Lot = ''
-                Reagent_Cartridge_SN = ''
+                reagent_cartridge_lot = ''
+                reagent_cartridge_sn = ''
 
-            RLU_Filename_dict[file_clean] = [SampleID] + [Test] + [RLUAverage] + [Reagent_Cartridge_Lot] + [Reagent_Cartridge_SN] + [Test_Start_Time_str] + [Test_End_Time_str]
+            RLU_Filename_dict[file_clean] = [SampleID] + [Test] + [RLUAverage] + [reagent_cartridge_lot] + [reagent_cartridge_sn] + [Test_Start_Time_str] + [Test_End_Time_str]
 
             RLU_Filename_Time_Start_End_dict[RLU_Filename_Time_Start_End_line_counter] = [file_clean] + [SampleID] + [Test] + [RLUAverage] + ['Start'] + [Test_Start_Time_str]
             RLU_Filename_Time_Start_End_line_counter += 1
@@ -186,7 +242,7 @@ for path, subdirs, files in os.walk(Raw_File_Folder):
 RLU_Filename_df = pd.DataFrame.from_dict(RLU_Filename_dict, "index", columns=['SampleID', 'Test', 'RLUAverage', 'Reagent_Cartridge_Lot', 'Reagent_Cartridge_SN', 'Test_Start_Time', 'Test_End_Time'])
 RLU_Filename_Time_Start_End_df = pd.DataFrame.from_dict(RLU_Filename_Time_Start_End_dict, "index", columns=['Filename', 'SampleID', 'Test', 'RLUAverage', 'Start-End', 'Time'])
 
-#  Convert RLU columns to numeric
+#  Convert RLU columns to numeric, round to three decimal places
 RLU_Filename_df['RLUAverage'] = pd.to_numeric(RLU_Filename_df['RLUAverage'], errors='coerce')
 RLU_Filename_Time_Start_End_df['RLUAverage'] = pd.to_numeric(RLU_Filename_Time_Start_End_df['RLUAverage'], errors='coerce')
 
